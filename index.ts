@@ -1,10 +1,14 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
 
-import { wecomPlugin } from "./src/channel.js";
+import { wecomPlugin, createWecomChannelPlugin } from "./src/channel.js";
 import { createWeComMcpTool } from "./src/mcp";
 import { setWeComRuntime } from "./src/runtime.js";
 import { PLUGIN_VERSION } from "./src/version.js";
+import {
+  resolveWeComAccountByChannelId,
+  listWeComChannelIds,
+} from "./src/utils.js";
 
 console.log(`[wecom] v${PLUGIN_VERSION} loaded`);
 
@@ -85,7 +89,27 @@ const plugin = {
   register(api: OpenClawPluginApi) {
 
     setWeComRuntime(api.runtime);
-    api.registerChannel({ plugin: wecomPlugin });
+
+    // 读取配置，根据已配置的 Channel 动态注册
+    const cfg = api.runtime.config.loadConfig();
+    const channelIds = listWeComChannelIds(cfg);
+
+    if (channelIds.length > 0) {
+      // 多 Agent 模式：为每个已配置的 Channel 创建独立的 ChannelPlugin
+      console.log(`[wecom] 检测到 ${channelIds.length} 个 Agent，动态注册 Channel`);
+      for (const channelId of channelIds) {
+        const account = resolveWeComAccountByChannelId(cfg, channelId);
+        if (account) {
+          const channelPlugin = createWecomChannelPlugin(account.accountId);
+          api.registerChannel({ plugin: channelPlugin });
+          console.log(`[wecom] 已注册 Channel: ${channelPlugin.id} (${account.name})`);
+        }
+      }
+    } else {
+      // 单 Agent/兼容模式：注册默认 Channel
+      console.log(`[wecom] 无 Agent 配置，注册默认 Channel: wecom`);
+      api.registerChannel({ plugin: wecomPlugin });
+    }
 
     // 注册 wecom_mcp：通过 HTTP 直接调用企业微信 MCP Server
     api.registerTool(createWeComMcpTool(), { name: "wecom_mcp" });

@@ -8,6 +8,25 @@
 export const CHANNEL_ID = "wecom" as const;
 
 /**
+ * 生成带账户名的 Channel ID
+ * 例如：wecom-bot1
+ */
+export function makeChannelId(accountName: string): string {
+  return `${CHANNEL_ID}-${accountName}`;
+}
+
+/**
+ * 从 Channel ID 中提取账户名
+ * 例如：wecom-bot1 -> bot1
+ */
+export function extractAccountNameFromChannelId(channelId: string): string | null {
+  if (!channelId.startsWith(`${CHANNEL_ID}-`)) {
+    return null;
+  }
+  return channelId.slice(CHANNEL_ID.length + 1);
+}
+
+/**
  * 企业微信 WebSocket 命令枚举
  */
 export enum WeComCommand {

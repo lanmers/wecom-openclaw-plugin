@@ -12,12 +12,12 @@ import { getWeComWebSocket } from "./state-manager.js";
 import { wecomOnboardingAdapter } from "./onboarding.js";
 import type { WeComConfig, ResolvedWeComAccount } from "./utils.js";
 import {
-  resolveWeComAccounts,
-  resolveWeComAccountByName,
-  setWeComAccountByName,
+  resolveWeComAccountByChannelId,
+  resolveWeComAccount,
+  listWeComChannelIds,
+  setWeComAccount,
   deleteWeComAccount,
   setWeComAccountEnabled,
-  listWeComAccountIds,
 } from "./utils.js";
 import { CHANNEL_ID, TEXT_CHUNK_LIMIT } from "./const.js";
 import { uploadAndSendMedia } from "./media-uploader.js";
@@ -102,20 +102,19 @@ export const wecomPlugin: ChannelPlugin<ResolvedWeComAccount> = {
   },
   reload: {configPrefixes: [`channels.${CHANNEL_ID}`]},
   config: {
-    // 列出所有账户 ID
-    listAccountIds: (cfg) => listWeComAccountIds(cfg),
+    // 列出所有已配置的 Channel ID
+    listAccountIds: (cfg) => listWeComChannelIds(cfg),
 
     // 解析账户配置（根据 accountId 查找）
     resolveAccount: (cfg, accountId) => {
       const id = accountId ?? DEFAULT_ACCOUNT_ID;
-      return resolveWeComAccountByName(cfg, id);
+      return resolveWeComAccountByChannelId(cfg, id);
     },
 
-    // 获取默认账户 ID（第一个启用的账户）
+    // 获取默认账户 ID（第一个已配置的 Channel）
     defaultAccountId: (cfg) => {
-      const accounts = resolveWeComAccounts(cfg);
-      const enabled = accounts.filter((a) => a.enabled);
-      return enabled.length > 0 ? enabled[0].accountId : DEFAULT_ACCOUNT_ID;
+      const channelIds = listWeComChannelIds(cfg);
+      return channelIds.length > 0 ? channelIds[0] : DEFAULT_ACCOUNT_ID;
     },
 
     // 设置账户启用状态
@@ -147,7 +146,7 @@ export const wecomPlugin: ChannelPlugin<ResolvedWeComAccount> = {
     // 解析允许来源列表
     resolveAllowFrom: ({cfg, accountId}) => {
       const id = accountId ?? DEFAULT_ACCOUNT_ID;
-      const account = resolveWeComAccountByName(cfg, id);
+      const account = resolveWeComAccountByChannelId(cfg, id);
       return (account?.config.allowFrom ?? []).map((entry) => String(entry));
     },
 
@@ -352,9 +351,9 @@ export const wecomPlugin: ChannelPlugin<ResolvedWeComAccount> = {
       const nextWecom = deleteWeComAccount(nextCfg, id);
 
       // 检查是否还有其他账户
-      const remainingAccounts = listWeComAccountIds(nextCfg);
+      const remainingChannelIds = listWeComChannelIds(nextCfg);
 
-      if (remainingAccounts.length === 0) {
+      if (remainingChannelIds.length === 0) {
         // 没有剩余账户，删除整个频道配置
         const nextChannels = {...nextCfg.channels};
         delete (nextChannels as Record<string, unknown>)[CHANNEL_ID];
@@ -369,10 +368,52 @@ export const wecomPlugin: ChannelPlugin<ResolvedWeComAccount> = {
         await getWeComRuntime().config.writeConfigFile(nextWecom);
       }
 
-      const resolved = resolveWeComAccountByName(cfg, id);
+      const resolved = resolveWeComAccountByChannelId(cfg, id);
       const loggedOut = !resolved?.botId && !resolved?.secret;
 
       return {cleared: true, envToken: false, loggedOut};
     },
   },
 };
+
+// ============================================================================
+// 动态 Channel 工厂函数（支持多 Agent）
+// ============================================================================
+
+import { makeChannelId } from "./const.js";
+
+/**
+ * 为指定账户创建独立的 ChannelPlugin
+ * 每个账户拥有独立的 Channel ID、独立的配置路径和独立的运行时
+ *
+ * @param accountName - 账户名称，将作为 Channel ID 的一部分
+ * @returns 配置好的 ChannelPlugin 实例
+ */
+export function createWecomChannelPlugin(accountName: string): ChannelPlugin<ResolvedWeComAccount> {
+  const channelId = makeChannelId(accountName);
+
+  return {
+    ...wecomPlugin,
+    id: channelId,
+    meta: {
+      ...wecomPlugin.meta!,
+      id: channelId,
+      label: `企业微信-${accountName}`,
+      selectionLabel: `企业微信 (${accountName})`,
+      detailLabel: `企业微信智能机器人 - ${accountName}`,
+      docsPath: `/channels/${channelId}`,
+      docsLabel: channelId,
+    },
+    config: {
+      ...wecomPlugin.config,
+      // 列出单个账户 ID
+      listAccountIds: () => [channelId],
+      // 解析账户配置 - 只返回该账户的配置
+      resolveAccount: (cfg) => resolveWeComAccountByChannelId(cfg, channelId),
+      // 默认账户 ID 就是这个账户
+      defaultAccountId: () => channelId,
+    },
+    reload: { configPrefixes: [`channels.${channelId}`] },
+  };
+}
+

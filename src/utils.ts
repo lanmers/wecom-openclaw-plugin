@@ -4,7 +4,7 @@
 
 import { DEFAULT_ACCOUNT_ID } from "openclaw/plugin-sdk";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { CHANNEL_ID } from "./const.js";
+import { CHANNEL_ID, extractAccountNameFromChannelId } from "./const.js";
 
 // ============================================================================
 // 配置类型定义
@@ -19,33 +19,14 @@ export interface WeComGroupConfig {
 }
 
 /**
- * 企业微信单个账户配置
- */
-export interface WeComAccountConfig {
-  /** 账户唯一标识（用于区分不同账户） */
-  name: string;
-  /** 机器人 ID */
-  botId: string;
-  /** 机器人密钥 */
-  secret: string;
-  /** 是否启用该账户 */
-  enabled?: boolean;
-  /** WebSocket URL（可选，默认使用全局配置） */
-  websocketUrl?: string;
-}
-
-/**
- * 企业微信配置类型（支持多账户）
+ * 企业微信配置类型
  */
 export interface WeComConfig {
   enabled?: boolean;
   websocketUrl?: string;
-  /** 旧版单账户配置（兼容用，会被迁移到 accounts） */
   botId?: string;
   secret?: string;
   name?: string;
-  /** 多账户配置数组（新版） */
-  accounts?: WeComAccountConfig[];
   allowFrom?: Array<string | number>;
   dmPolicy?: "open" | "allowlist" | "pairing" | "disabled";
   /** 群组访问策略："open" = 允许所有群组（默认），"allowlist" = 仅允许 groupAllowFrom 中的群组，"disabled" = 禁用群组消息 */
@@ -75,143 +56,97 @@ export interface ResolvedWeComAccount {
 }
 
 /**
- * 迁移旧版配置到新版 accounts 数组格式
+ * 从 Channel ID 解析对应的 WeCom 配置
+ *
+ * 支持两种配置方式：
+ * 1. 多 Agent 模式：channels.wecom-bot1, channels.wecom-bot2（推荐）
+ * 2. 单 Agent 模式：channels.wecom（兼容旧版）
+ *
+ * @param cfg - OpenClaw 配置
+ * @param channelId - Channel ID（如 wecom-bot1 或 wecom）
+ * @returns 解析后的账户配置
  */
-function migrateToAccounts(wecomConfig: WeComConfig): WeComConfig {
-  // 如果已经有 accounts 数组，无需迁移
-  if (wecomConfig.accounts && wecomConfig.accounts.length > 0) {
-    return wecomConfig;
-  }
-
-  // 如果有旧的 botId/secret 配置，迁移到 accounts
-  if (wecomConfig.botId || wecomConfig.secret) {
-    const accountName = wecomConfig.name || "default";
-    return {
-      ...wecomConfig,
-      accounts: [
-        {
-          name: accountName,
-          botId: wecomConfig.botId || "",
-          secret: wecomConfig.secret || "",
-          enabled: wecomConfig.enabled ?? true,
-          websocketUrl: wecomConfig.websocketUrl,
-        },
-      ],
-      // 保留旧字段用于向后兼容（但优先使用 accounts）
-      botId: undefined,
-      secret: undefined,
-    };
-  }
-
-  return wecomConfig;
-}
-
-/**
- * 从 accounts 数组中解析所有已启用的账户
- */
-function resolveAccountsFromConfig(wecomConfig: WeComConfig): ResolvedWeComAccount[] {
-  const accounts = wecomConfig.accounts ?? [];
-
-  if (accounts.length === 0) {
-    return [];
-  }
-
-  return accounts.map((account) => ({
-    accountId: account.name,
-    name: account.name,
-    enabled: account.enabled ?? true,
-    websocketUrl: account.websocketUrl || wecomConfig.websocketUrl || DefaultWsUrl,
-    botId: account.botId ?? "",
-    secret: account.secret ?? "",
-    sendThinkingMessage: wecomConfig.sendThinkingMessage ?? true,
-    config: wecomConfig,
-  }));
-}
-
-/**
- * 解析企业微信账户配置（返回所有已启用的账户）
- */
-export function resolveWeComAccounts(cfg: OpenClawConfig): ResolvedWeComAccount[] {
-  const wecomConfig = (cfg.channels?.[CHANNEL_ID] ?? {}) as WeComConfig;
-
-  // 迁移旧配置到新格式
-  const migratedConfig = migrateToAccounts(wecomConfig);
-
-  return resolveAccountsFromConfig(migratedConfig);
-}
-
-/**
- * 根据 name 查找单个账户配置
- */
-export function resolveWeComAccountByName(
+export function resolveWeComAccountByChannelId(
   cfg: OpenClawConfig,
-  name: string,
+  channelId: string,
 ): ResolvedWeComAccount | null {
-  const wecomConfig = (cfg.channels?.[CHANNEL_ID] ?? {}) as WeComConfig;
-  const migratedConfig = migrateToAccounts(wecomConfig);
+  // 尝试从 Channel ID 提取账户名
+  const accountName = extractAccountNameFromChannelId(channelId);
 
-  const accounts = migratedConfig.accounts ?? [];
-  const account = accounts.find((a) => a.name === name);
+  let wecomConfig: WeComConfig;
 
-  if (!account) {
+  if (accountName) {
+    // 多 Agent 模式：从 channels.wecom-{name} 读取配置
+    const key = `${CHANNEL_ID}-${accountName}` as keyof typeof cfg.channels;
+    wecomConfig = (cfg.channels?.[key] ?? {}) as WeComConfig;
+  } else {
+    // 单 Agent 模式：从 channels.wecom 读取配置（兼容旧版）
+    wecomConfig = (cfg.channels?.[CHANNEL_ID] ?? {}) as WeComConfig;
+  }
+
+  // 检查是否已配置
+  if (!wecomConfig.botId && !wecomConfig.secret) {
     return null;
   }
 
   return {
-    accountId: account.name,
-    name: account.name,
-    enabled: account.enabled ?? true,
-    websocketUrl: account.websocketUrl || migratedConfig.websocketUrl || DefaultWsUrl,
-    botId: account.botId ?? "",
-    secret: account.secret ?? "",
-    sendThinkingMessage: migratedConfig.sendThinkingMessage ?? true,
-    config: migratedConfig,
-  };
-}
-
-/**
- * 解析企业微信账户配置（兼容旧版，返回第一个账户或默认账户）
- * @deprecated 请使用 resolveWeComAccounts 或 resolveWeComAccountByName
- */
-export function resolveWeComAccount(cfg: OpenClawConfig): ResolvedWeComAccount {
-  const accounts = resolveWeComAccounts(cfg);
-
-  if (accounts.length > 0) {
-    return accounts[0];
-  }
-
-  // 返回空账户（兼容旧代码）
-  const wecomConfig = (cfg.channels?.[CHANNEL_ID] ?? {}) as WeComConfig;
-  return {
-    accountId: DEFAULT_ACCOUNT_ID,
-    name: "企业微信",
-    enabled: false,
+    accountId: accountName || DEFAULT_ACCOUNT_ID,
+    name: wecomConfig.name || accountName || "企业微信",
+    enabled: wecomConfig.enabled ?? true,
     websocketUrl: wecomConfig.websocketUrl || DefaultWsUrl,
-    botId: "",
-    secret: "",
-    sendThinkingMessage: true,
+    botId: wecomConfig.botId ?? "",
+    secret: wecomConfig.secret ?? "",
+    sendThinkingMessage: wecomConfig.sendThinkingMessage ?? true,
     config: wecomConfig,
   };
 }
 
 /**
- * 获取所有账户 ID（从 accounts 数组中提取）
+ * 解析企业微信账户配置（兼容旧版，返回 wecom 频道配置）
+ * @deprecated 请使用 resolveWeComAccountByChannelId
  */
-export function listWeComAccountIds(cfg: OpenClawConfig): string[] {
-  const wecomConfig = (cfg.channels?.[CHANNEL_ID] ?? {}) as WeComConfig;
-  const migratedConfig = migrateToAccounts(wecomConfig);
+export function resolveWeComAccount(cfg: OpenClawConfig): ResolvedWeComAccount {
+  const result = resolveWeComAccountByChannelId(cfg, CHANNEL_ID);
 
-  const accounts = migratedConfig.accounts ?? [];
-  if (accounts.length > 0) {
-    return accounts.map((a) => a.name);
+  if (result) {
+    return result;
   }
 
-  // 兼容旧配置
-  if (wecomConfig.botId || wecomConfig.secret) {
-    return [wecomConfig.name || DEFAULT_ACCOUNT_ID];
+  // 返回空账户（兼容旧代码）
+  return {
+    accountId: DEFAULT_ACCOUNT_ID,
+    name: "企业微信",
+    enabled: false,
+    websocketUrl: DefaultWsUrl,
+    botId: "",
+    secret: "",
+    sendThinkingMessage: true,
+    config: {},
+  };
+}
+
+/**
+ * 列出所有已配置的 WeCom Channel ID
+ *
+ * 扫描所有 channels 键，找出以 wecom 或 wecom- 开头的配置
+ */
+export function listWeComChannelIds(cfg: OpenClawConfig): string[] {
+  const channels = cfg.channels ?? {};
+  const channelIds: string[] = [];
+
+  for (const key of Object.keys(channels)) {
+    // 匹配 wecom 或 wecom-* 格式
+    if (key === CHANNEL_ID || key.startsWith(`${CHANNEL_ID}-`)) {
+      const wecomConfig = channels[key] as WeComConfig;
+      // 只有配置了 botId 或 secret 的才返回
+      if (wecomConfig.botId || wecomConfig.secret) {
+        channelIds.push(key);
+      }
+    }
   }
 
-  return [];
+  // 按字母排序
+  return channelIds.sort();
 }
 
 /**
@@ -219,16 +154,16 @@ export function listWeComAccountIds(cfg: OpenClawConfig): string[] {
  */
 export function setWeComAccount(
   cfg: OpenClawConfig,
+  channelId: string,
   account: Partial<WeComConfig>,
 ): OpenClawConfig {
-  const existing = (cfg.channels?.[CHANNEL_ID] ?? {}) as WeComConfig;
+  const existing = (cfg.channels?.[channelId] ?? {}) as WeComConfig;
   const merged: WeComConfig = {
     enabled: account.enabled ?? existing?.enabled ?? true,
     botId: account.botId ?? existing?.botId ?? "",
     secret: account.secret ?? existing?.secret ?? "",
     allowFrom: account.allowFrom ?? existing?.allowFrom,
     dmPolicy: account.dmPolicy ?? existing?.dmPolicy,
-    // 以下字段仅在已有配置值或显式传入时才写入，onboarding 时不主动生成
     ...(account.websocketUrl || existing?.websocketUrl
       ? { websocketUrl: account.websocketUrl ?? existing?.websocketUrl }
       : {}),
@@ -238,89 +173,32 @@ export function setWeComAccount(
     ...(account.sendThinkingMessage !== undefined || existing?.sendThinkingMessage !== undefined
       ? { sendThinkingMessage: account.sendThinkingMessage ?? existing?.sendThinkingMessage }
       : {}),
+    ...(account.groupPolicy !== undefined || existing?.groupPolicy !== undefined
+      ? { groupPolicy: account.groupPolicy ?? existing?.groupPolicy }
+      : {}),
+    ...(account.groupAllowFrom !== undefined || existing?.groupAllowFrom !== undefined
+      ? { groupAllowFrom: account.groupAllowFrom ?? existing?.groupAllowFrom }
+      : {}),
   };
 
   return {
     ...cfg,
     channels: {
       ...cfg.channels,
-      [CHANNEL_ID]: merged,
+      [channelId]: merged,
     },
   };
 }
 
 /**
- * 添加或更新单个账户配置
+ * 删除指定 Channel 的配置
  */
-export function setWeComAccountByName(
-  cfg: OpenClawConfig,
-  name: string,
-  accountConfig: Partial<WeComAccountConfig>,
-): OpenClawConfig {
-  const existing = (cfg.channels?.[CHANNEL_ID] ?? {}) as WeComConfig;
-  const migratedConfig = migrateToAccounts(existing);
-
-  const accounts = migratedConfig.accounts ?? [];
-  const existingIndex = accounts.findIndex((a) => a.name === name);
-
-  const newAccount: WeComAccountConfig = {
-    name,
-    botId: accountConfig.botId ?? "",
-    secret: accountConfig.secret ?? "",
-    enabled: accountConfig.enabled ?? true,
-    websocketUrl: accountConfig.websocketUrl,
-  };
-
-  let newAccounts: WeComAccountConfig[];
-  if (existingIndex >= 0) {
-    // 更新现有账户
-    newAccounts = [...accounts];
-    newAccounts[existingIndex] = { ...newAccounts[existingIndex], ...newAccount };
-  } else {
-    // 添加新账户
-    newAccounts = [...accounts, newAccount];
-  }
+export function deleteWeComAccount(cfg: OpenClawConfig, channelId: string): OpenClawConfig {
+  const { [channelId]: _, ...remaining } = cfg.channels ?? {};
 
   return {
     ...cfg,
-    channels: {
-      ...cfg.channels,
-      [CHANNEL_ID]: {
-        ...migratedConfig,
-        accounts: newAccounts,
-        // 保留全局配置
-        dmPolicy: existing.dmPolicy,
-        allowFrom: existing.allowFrom,
-        groupPolicy: existing.groupPolicy,
-        groupAllowFrom: existing.groupAllowFrom,
-        groups: existing.groups,
-        sendThinkingMessage: existing.sendThinkingMessage,
-        mediaLocalRoots: existing.mediaLocalRoots,
-      },
-    },
-  };
-}
-
-/**
- * 根据 name 删除账户
- */
-export function deleteWeComAccount(cfg: OpenClawConfig, name: string): OpenClawConfig {
-  const existing = (cfg.channels?.[CHANNEL_ID] ?? {}) as WeComConfig;
-  const migratedConfig = migrateToAccounts(existing);
-
-  const accounts = migratedConfig.accounts ?? [];
-  const newAccounts = accounts.filter((a) => a.name !== name);
-
-  // 如果删除后没有账户了，保留空数组
-  return {
-    ...cfg,
-    channels: {
-      ...cfg.channels,
-      [CHANNEL_ID]: {
-        ...migratedConfig,
-        accounts: newAccounts,
-      },
-    },
+    channels: remaining,
   };
 }
 
@@ -329,8 +207,8 @@ export function deleteWeComAccount(cfg: OpenClawConfig, name: string): OpenClawC
  */
 export function setWeComAccountEnabled(
   cfg: OpenClawConfig,
-  name: string,
+  channelId: string,
   enabled: boolean,
 ): OpenClawConfig {
-  return setWeComAccountByName(cfg, name, { enabled });
+  return setWeComAccount(cfg, channelId, { enabled });
 }

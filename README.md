@@ -45,7 +45,7 @@ openclaw plugins install @lanmers/wecom-openclaw-plugin
 
 ### 配置
 
-#### 方式一：交互式配置
+#### 方式一：交互式配置（单 Agent）
 
 ```shell
 openclaw channels add
@@ -53,12 +53,38 @@ openclaw channels add
 
 按照提示输入企业微信机器人的 **Bot ID** 和 **Secret**。
 
-#### 方式二：CLI 快速配置
+#### 方式二：交互式配置（多 Agent）
+
+```shell
+# 添加第一个 Agent
+openclaw channels add wecom-bot1
+
+# 添加更多 Agent
+openclaw channels add wecom-bot2
+```
+
+#### 方式三：CLI 快速配置（单 Agent）
 
 ```shell
 openclaw config set channels.wecom.botId <YOUR_BOT_ID>
 openclaw config set channels.wecom.secret <YOUR_BOT_SECRET>
 openclaw config set channels.wecom.enabled true
+openclaw gateway restart
+```
+
+#### 方式四：CLI 快速配置（多 Agent）
+
+```shell
+# 配置第一个 Agent
+openclaw config set channels.wecom-bot1.botId <BOT_ID_1>
+openclaw config set channels.wecom-bot1.secret <SECRET_1>
+openclaw config set channels.wecom-bot1.enabled true
+
+# 配置第二个 Agent
+openclaw config set channels.wecom-bot2.botId <BOT_ID_2>
+openclaw config set channels.wecom-bot2.secret <SECRET_2>
+openclaw config set channels.wecom-bot2.enabled true
+
 openclaw gateway restart
 ```
 
@@ -78,27 +104,34 @@ openclaw gateway restart
 | `channels.wecom.groupAllowFrom` | 群聊白名单（群组 ID） | - | `[]` |
 | `channels.wecom.sendThinkingMessage` | 发送"思考中"占位消息 | `true` / `false` | `true` |
 
-#### 多账户配置（推荐）
+---
+
+## 🤖 多 Agent 模式（推荐）
+
+插件支持为每个企业微信机器人创建独立的 Agent，拥有独立的对话上下文和 MCP 工具配置。
+
+### 工作原理
+
+- 直接在 `channels` 下配置每个 Agent（格式：`wecom-{name}`）
+- 每个 Agent 独立运行、独立的 WebSocket 连接、独立的对话历史
+- 每个 Agent 拥有独立的访问策略配置
+
+### 配置示例
 
 ```json
 {
   "channels": {
-    "wecom": {
+    "wecom-bot1": {
+      "botId": "xxx",
+      "secret": "xxx",
       "enabled": true,
-      "accounts": [
-        {
-          "name": "bot1",
-          "botId": "xxx",
-          "secret": "xxx",
-          "enabled": true
-        },
-        {
-          "name": "bot2",
-          "botId": "yyy",
-          "secret": "yyy",
-          "enabled": false
-        }
-      ]
+      "dmPolicy": "open"
+    },
+    "wecom-bot2": {
+      "botId": "yyy",
+      "secret": "yyy",
+      "enabled": true,
+      "dmPolicy": "pairing"
     }
   }
 }
@@ -106,11 +139,84 @@ openclaw gateway restart
 
 | 配置路径 | 说明 | 选项 | 默认值 |
 |----------|------|------|--------|
-| `channels.wecom.accounts[].name` | 账户唯一标识 | - | - |
-| `channels.wecom.accounts[].botId` | 企业微信机器人 ID | - | - |
-| `channels.wecom.accounts[].secret` | 企业微信机器人密钥 | - | - |
-| `channels.wecom.accounts[].enabled` | 启用该账户 | `true` / `false` | `true` |
-| `channels.wecom.accounts[].websocketUrl` | WebSocket 端点（可选，覆盖全局配置） | - | - |
+| `channels.wecom-{name}.botId` | 企业微信机器人 ID | - | - |
+| `channels.wecom-{name}.secret` | 企业微信机器人密钥 | - | - |
+| `channels.wecom-{name}.enabled` | 启用该 Agent | `true` / `false` | `true` |
+| `channels.wecom-{name}.dmPolicy` | 私信访问策略 | `pairing` / `open` / `allowlist` / `disabled` | `open` |
+| `channels.wecom-{name}.allowFrom` | 私信白名单 | - | - |
+| `channels.wecom-{name}.groupPolicy` | 群聊访问策略 | `open` / `allowlist` / `disabled` | `open` |
+| `channels.wecom-{name}.groupAllowFrom` | 群聊白名单 | - | - |
+| `channels.wecom-{name}.sendThinkingMessage` | 发送思考中消息 | `true` / `false` | `true` |
+
+### CLI 命令
+
+```shell
+# 查看所有 Agent
+openclaw channels list
+
+# 查看特定 Agent 状态
+openclaw channels status wecom-bot1
+
+# 添加新 Agent
+openclaw channels add wecom-bot2 --bot-id <id> --secret <secret>
+
+# 删除 Agent
+openclaw channels remove wecom-bot1
+```
+
+---
+      "secret": "xxx",
+      "enabled": true,
+      "dmPolicy": "open",
+      "allowFrom": ["*"],
+      "groupPolicy": "open",
+      "sendThinkingMessage": true
+    },
+    "wecom-bot2": {
+      "botId": "yyy",
+      "secret": "yyy",
+      "enabled": true,
+      "dmPolicy": "pairing",
+      "allowFrom": ["user1", "user2"],
+      "groupPolicy": "allowlist",
+      "groupAllowFrom": ["group1"],
+      "sendThinkingMessage": false
+    }
+  }
+}
+```
+
+| 配置路径 | 说明 | 选项 | 默认值 |
+|----------|------|------|--------|
+| `channels.wecom-{name}.dmPolicy` | 私信访问策略 | `pairing` / `open` / `allowlist` / `disabled` | 继承全局 |
+| `channels.wecom-{name}.allowFrom` | 私信白名单 | - | 继承全局 |
+| `channels.wecom-{name}.groupPolicy` | 群聊访问策略 | `open` / `allowlist` / `disabled` | 继承全局 |
+| `channels.wecom-{name}.groupAllowFrom` | 群聊白名单 | - | 继承全局 |
+| `channels.wecom-{name}.sendThinkingMessage` | 发送思考中消息 | `true` / `false` | `true` |
+
+### MCP 工具调用
+
+```typescript
+// 调用指定 Agent 的 MCP 服务
+wecom_mcp list contact --accountId bot1
+wecom_mcp call contact getContact '{}' --accountId bot2
+```
+
+### CLI 命令
+
+```shell
+# 查看所有 Agent
+openclaw channels list
+
+# 查看特定 Agent 状态
+openclaw channels status wecom-bot1
+
+# 添加新 Agent
+openclaw channels add wecom-bot2 --bot-id <id> --secret <secret>
+
+# 删除 Agent
+openclaw channels remove wecom-bot1
+```
 
 ---
 

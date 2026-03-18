@@ -11,12 +11,13 @@ import {
 } from "openclaw/plugin-sdk";
 import type { ResolvedWeComAccount } from "./utils.js";
 import {
-  resolveWeComAccounts,
-  resolveWeComAccountByName,
-  setWeComAccountByName,
-  listWeComAccountIds,
+  resolveWeComAccountByChannelId,
+  resolveWeComAccount,
+  listWeComChannelIds,
+  setWeComAccount,
+  deleteWeComAccount,
 } from "./utils.js";
-import { CHANNEL_ID } from "./const.js";
+import { CHANNEL_ID, makeChannelId } from "./const.js";
 
 const channel = CHANNEL_ID;
 
@@ -27,7 +28,7 @@ async function noteWeComSetupHelp(prompter: WizardPrompter): Promise<void> {
   await prompter.note(
     [
       "企业微信机器人需要以下配置信息：",
-      "1. 账户名称：用于区分不同账户（必填）",
+      "1. Agent 名称：用于区分不同机器人（必填）",
       "2. Bot ID：企业微信机器人id",
       "3. Secret：企业微信机器人密钥",
     ].join("\n"),
@@ -36,9 +37,9 @@ async function noteWeComSetupHelp(prompter: WizardPrompter): Promise<void> {
 }
 
 /**
- * 提示输入账户名称
+ * 提示输入 Agent 名称
  */
-async function promptAccountName(
+async function promptAgentName(
   prompter: WizardPrompter,
   existingNames: string[],
 ): Promise<string> {
@@ -52,7 +53,7 @@ async function promptAccountName(
 
   return String(
     await prompter.text({
-      message: "账户名称（用于区分不同机器人）",
+      message: "Agent 名称（用于区分不同机器人）",
       initialValue: defaultName,
       validate: (value) => {
         const name = value?.trim();
@@ -103,13 +104,10 @@ async function promptSecret(
  */
 function setWeComDmPolicy(
   cfg: OpenClawConfig,
+  channelId: string,
   dmPolicy: "pairing" | "allowlist" | "open" | "disabled",
-  accountId?: string,
 ): OpenClawConfig {
-  const account = accountId
-    ? resolveWeComAccountByName(cfg, accountId)
-    : resolveWeComAccounts(cfg)[0];
-
+  const account = resolveWeComAccountByChannelId(cfg, channelId);
   if (!account) return cfg;
 
   const existingAllowFrom = account.config.allowFrom ?? [];
@@ -118,7 +116,7 @@ function setWeComDmPolicy(
       ? addWildcardAllowFrom(existingAllowFrom.map((x) => String(x)))
       : existingAllowFrom.map((x) => String(x));
 
-  return setWeComAccountByName(cfg, account.accountId, {
+  return setWeComAccount(cfg, channelId, {
     dmPolicy,
     allowFrom,
   });
@@ -127,20 +125,20 @@ function setWeComDmPolicy(
 const dmPolicy: ChannelOnboardingDmPolicy = {
   label: "企业微信",
   channel,
-  policyKey: `channels.${CHANNEL_ID}.dmPolicy`,
-  allowFromKey: `channels.${CHANNEL_ID}.allowFrom`,
-  getCurrent: (cfg) => {
-    const accounts = resolveWeComAccounts(cfg);
-    if (accounts.length === 0) return "open";
-    return accounts[0].config.dmPolicy ?? "open";
+  policyKey: (accountId) => accountId ? `channels.${makeChannelId(accountId)}.dmPolicy` : `channels.${CHANNEL_ID}.dmPolicy`,
+  allowFromKey: (accountId) => accountId ? `channels.${makeChannelId(accountId)}.allowFrom` : `channels.${CHANNEL_ID}.allowFrom`,
+  getCurrent: (cfg, accountId) => {
+    const channelId = accountId ? makeChannelId(accountId) : CHANNEL_ID;
+    const account = resolveWeComAccountByChannelId(cfg, channelId);
+    return account?.config.dmPolicy ?? "open";
   },
   setPolicy: (cfg, policy, accountId) => {
-    return setWeComDmPolicy(cfg, policy, accountId);
+    const channelId = accountId ? makeChannelId(accountId) : CHANNEL_ID;
+    return setWeComDmPolicy(cfg, channelId, policy);
   },
   promptAllowFrom: async ({cfg, prompter, accountId}) => {
-    const account = accountId
-      ? resolveWeComAccountByName(cfg, accountId)
-      : resolveWeComAccounts(cfg)[0];
+    const channelId = accountId ? makeChannelId(accountId) : CHANNEL_ID;
+    const account = resolveWeComAccountByChannelId(cfg, channelId);
 
     if (!account) {
       return cfg;
@@ -159,42 +157,57 @@ const dmPolicy: ChannelOnboardingDmPolicy = {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    return setWeComAccountByName(cfg, account.accountId, { allowFrom });
+    return setWeComAccount(cfg, channelId, { allowFrom });
   },
 };
 
 export const wecomOnboardingAdapter: ChannelOnboardingAdapter = {
   channel,
   getStatus: async ({cfg}) => {
-    const accounts = resolveWeComAccounts(cfg);
-    const configured = accounts.some(
-      (a) => a.botId?.trim() && a.secret?.trim()
-    );
-    const accountNames = accounts.map((a) => a.name).join(", ");
+    const channelIds = listWeComChannelIds(cfg);
+    const accountNames: string[] = [];
+
+    for (const channelId of channelIds) {
+      const account = resolveWeComAccountByChannelId(cfg, channelId);
+      if (account && account.botId?.trim() && account.secret?.trim()) {
+        accountNames.push(account.name);
+      }
+    }
+
+    const configured = accountNames.length > 0;
+    const namesStr = accountNames.join(", ");
 
     return {
       channel,
       configured,
       statusLines: [
-        `企业微信: ${configured ? `${accountNames || "已配置"}` : "需要 Bot ID 和 Secret"}`,
+        `企业微信: ${configured ? `${namesStr || "已配置"}` : "需要 Bot ID 和 Secret"}`,
       ],
-      selectionHint: configured ? accountNames || "已配置" : "需要设置",
+      selectionHint: configured ? namesStr || "已配置" : "需要设置",
     };
   },
   configure: async ({cfg, prompter, forceAllowFrom, accountId}) => {
-    // 如果指定了 accountId，则更新该账户；否则创建新账户或更新第一个账户
+    // 如果指定了 accountId，则使用该 Agent；否则创建新 Agent
     let targetAccountId = accountId;
-    const existingAccounts = resolveWeComAccounts(cfg);
-    const existingNames = existingAccounts.map((a) => a.name);
+    const channelIds = listWeComChannelIds(cfg);
+    const existingNames = channelIds.map(id => {
+      // 提取账户名（wecom-bot1 -> bot1）
+      const match = id.match(/^wecom-(.+)$/);
+      return match ? match[1] : id;
+    });
 
     if (!targetAccountId) {
-      // 没有指定账户，提示输入新账户名称
-      const accountName = await promptAccountName(prompter, existingNames);
-      targetAccountId = accountName;
+      // 没有指定 Agent，提示输入新 Agent 名称
+      const agentName = await promptAgentName(prompter, existingNames);
+      targetAccountId = agentName;
     }
 
-    // 获取现有账户配置（如果有）
-    const existingAccount = resolveWeComAccountByName(cfg, targetAccountId);
+    const channelId = targetAccountId.startsWith("wecom-")
+      ? targetAccountId
+      : makeChannelId(targetAccountId);
+
+    // 获取现有配置（如果有）
+    const existingAccount = resolveWeComAccountByChannelId(cfg, channelId);
 
     if (!existingAccount?.botId?.trim() || !existingAccount?.secret?.trim()) {
       await noteWeComSetupHelp(prompter);
@@ -204,30 +217,26 @@ export const wecomOnboardingAdapter: ChannelOnboardingAdapter = {
     const botId = await promptBotId(prompter, existingAccount);
     const secret = await promptSecret(prompter, existingAccount);
 
-    // 使用 setWeComAccountByName 更新或添加账户
-    const cfgWithAccount = setWeComAccountByName(cfg, targetAccountId, {
+    // 使用 setWeComAccount 更新或添加配置
+    const cfgWithAccount = setWeComAccount(cfg, channelId, {
       botId,
       secret,
       enabled: true,
     });
 
-    // 保留全局策略配置
-    if (existingAccounts.length > 0 && existingAccounts[0].config.dmPolicy) {
-      // 已有全局配置，保持不变
-    }
-
-    return {cfg: cfgWithAccount, accountId: targetAccountId};
+    return { cfg: cfgWithAccount, accountId: targetAccountId };
   },
   dmPolicy,
   disable: (cfg, accountId) => {
     if (accountId) {
-      return setWeComAccountByName(cfg, accountId, { enabled: false });
+      const channelId = accountId.startsWith("wecom-") ? accountId : makeChannelId(accountId);
+      return setWeComAccount(cfg, channelId, { enabled: false });
     }
-    // 没有指定账户，禁用所有账户
-    const accounts = resolveWeComAccounts(cfg);
+    // 没有指定 Agent，禁用所有 Agent
+    const channelIds = listWeComChannelIds(cfg);
     let result = cfg;
-    for (const account of accounts) {
-      result = setWeComAccountByName(result, account.accountId, { enabled: false });
+    for (const id of channelIds) {
+      result = setWeComAccount(result, id, { enabled: false });
     }
     return result;
   },

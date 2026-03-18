@@ -49,6 +49,8 @@ npm run release
 
 通过 OpenClaw 配置（通常是 `openclaw.json`）：
 
+**单 Agent 模式（兼容旧版）：**
+
 ```json
 {
   "channels": {
@@ -56,9 +58,9 @@ npm run release
       "botId": "...",
       "secret": "...",
       "enabled": true,
-      "dmPolicy": "open",        // "pairing" | "open" | "allowlist" | "disabled"
+      "dmPolicy": "open",
       "allowFrom": ["*"],
-      "groupPolicy": "open",     // "open" | "allowlist" | "disabled"
+      "groupPolicy": "open",
       "groupAllowFrom": [],
       "sendThinkingMessage": true
     }
@@ -66,9 +68,44 @@ npm run release
 }
 ```
 
-## 核心概念
+**多 Agent 模式（推荐）：**
 
+```json
+{
+  "channels": {
+    "wecom-bot1": {
+      "botId": "...",
+      "secret": "...",
+      "enabled": true,
+      "dmPolicy": "open"
+    },
+    "wecom-bot2": {
+      "botId": "...",
+      "secret": "...",
+      "enabled": true,
+      "dmPolicy": "pairing"
+    }
+  }
+}
+```
+
+### 配置字段说明
+
+| 字段 | 说明 | 选项 |
+|------|------|------|
+| `botId` | 企业微信机器人 ID | - |
+| `secret` | 企业微信机器人密钥 | - |
+| `enabled` | 启用该 Agent | `true` / `false` |
+| `dmPolicy` | 私信访问策略 | `pairing` / `open` / `allowlist` / `disabled` |
+| `allowFrom` | 私信白名单 | - |
+| `groupPolicy` | 群聊访问策略 | `open` / `allowlist` / `disabled` |
+| `groupAllowFrom` | 群聊白名单 | - |
+| `sendThinkingMessage` | 发送思考中消息 | `true` / `false` |
+
+### 核心概念
+
+- **多 Agent 模式**: 每个 Agent 拥有独立的 Channel ID（`wecom-{name}`）、独立的 WebSocket 连接、独立的对话上下文
 - **WebSocket 连接**: 使用 `@wecom/aibot-node-sdk` 实现持久连接，支持自动重连（最多 100 次）
 - **消息流程**: 收到消息 → 策略检查 → AI 处理 → 流式响应
 - **媒体处理**: 支持图片、文件、视频、语音（仅 AMR），大小限制（图片/视频 10MB，语音 2MB，文件 20MB）
-- **MCP 工具**: `wecom_mcp` 工具允许通过 HTTP 直接调用 MCP 服务器
+- **MCP 工具**: `wecom_mcp` 工具允许通过 HTTP 直接调用 MCP 服务器，支持 `accountId` 参数指定 Agent

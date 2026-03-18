@@ -26,6 +26,8 @@ interface WeComToolsParams {
   action: "list" | "call";
   /** MCP 品类，对应 mcpConfig 中的 key，如 doc、contact */
   category: string;
+  /** 账户 ID（可选，用于多账户场景） */
+  accountId?: string;
   /** 调用的 MCP 方法名（action=call 时必填） */
   method?: string;
   /** 调用 MCP 方法的 JSON 参数（action=call 时使用） */
@@ -57,8 +59,8 @@ const errorResult = (err: unknown) => {
 // list 操作：列出某品类的所有 MCP 工具
 // ============================================================================
 
-const handleList = async (category: string): Promise<unknown> => {
-  const result = await sendJsonRpc(category, "tools/list") as { tools?: McpToolInfo[] } | undefined;
+const handleList = async (category: string, accountId?: string): Promise<unknown> => {
+  const result = await sendJsonRpc(category, "tools/list", undefined, accountId) as { tools?: McpToolInfo[] } | undefined;
 
   const tools = result?.tools ?? [];
   if (tools.length === 0) {
@@ -67,6 +69,7 @@ const handleList = async (category: string): Promise<unknown> => {
 
   return {
     category,
+    accountId: accountId ?? "default",
     count: tools.length,
     tools: tools.map((t) => ({
       name: t.name,
@@ -98,7 +101,7 @@ const BIZ_CACHE_CLEAR_ERROR_CODES = new Set([850002]);
  * MCP Server 可能在正常的 JSON-RPC 响应中返回业务层错误，
  * 这些错误被包裹在 result.content[].text 中，需要解析后判断。
  */
-const checkBizErrorAndClearCache = (result: unknown, category: string): void => {
+const checkBizErrorAndClearCache = (result: unknown, category: string, accountId?: string): void => {
   if (!result || typeof result !== "object") return;
 
   const { content } = result as { content?: Array<{ type: string; text?: string }> };
@@ -109,8 +112,8 @@ const checkBizErrorAndClearCache = (result: unknown, category: string): void => 
     try {
       const parsed = JSON.parse(item.text) as Record<string, unknown>;
       if (typeof parsed.errcode === "number" && BIZ_CACHE_CLEAR_ERROR_CODES.has(parsed.errcode)) {
-        console.log(`[mcp] 检测到业务错误码 ${parsed.errcode} (category="${category}")，清理缓存`);
-        clearCategoryCache(category);
+        console.log(`[mcp] 检测到业务错误码 ${parsed.errcode} (category="${category}", accountId="${accountId}")，清理缓存`);
+        clearCategoryCache(category, accountId);
         return;
       }
     } catch {
@@ -123,14 +126,15 @@ const handleCall = async (
   category: string,
   method: string,
   args: Record<string, unknown>,
+  accountId?: string,
 ): Promise<unknown> => {
   const result = await sendJsonRpc(category, "tools/call", {
     name: method,
     arguments: args,
-  });
+  }, accountId);
 
   // 检查业务层错误码，必要时清理缓存
-  checkBizErrorAndClearCache(result, category);
+  checkBizErrorAndClearCache(result, category, accountId);
 
   return result;
 };
@@ -190,6 +194,10 @@ export function createWeComMcpTool() {
           type: "string",
           description: "MCP 品类名称，如 doc、contact 等，对应 mcpConfig 中的 key",
         },
+        accountId: {
+          type: "string",
+          description: "账户 ID（可选，用于多账户场景，指定使用哪个账户的 MCP 服务）",
+        },
         method: {
           type: "string",
           description: "要调用的 MCP 方法名（action=call 时必填）",
@@ -206,13 +214,13 @@ export function createWeComMcpTool() {
       try {
         switch (p.action) {
           case "list":
-            return textResult(await handleList(p.category));
+            return textResult(await handleList(p.category, p.accountId));
           case "call": {
             if (!p.method) {
               return textResult({ error: "action 为 call 时必须提供 method 参数" });
             }
             const args = parseArgs(p.args);
-            return textResult(await handleCall(p.category, p.method, args));
+            return textResult(await handleCall(p.category, p.method, args, p.accountId));
           }
           default:
             return textResult({ error: `未知操作类型: ${String(p.action)}，支持 list 和 call` });

@@ -11,7 +11,14 @@ import { monitorWeComProvider } from "./monitor.js";
 import { getWeComWebSocket } from "./state-manager.js";
 import { wecomOnboardingAdapter } from "./onboarding.js";
 import type { WeComConfig, ResolvedWeComAccount } from "./utils.js";
-import { resolveWeComAccount } from "./utils.js";
+import {
+  resolveWeComAccounts,
+  resolveWeComAccountByName,
+  setWeComAccountByName,
+  deleteWeComAccount,
+  setWeComAccountEnabled,
+  listWeComAccountIds,
+} from "./utils.js";
 import { CHANNEL_ID, TEXT_CHUNK_LIMIT } from "./const.js";
 import { uploadAndSendMedia } from "./media-uploader.js";
 
@@ -95,41 +102,32 @@ export const wecomPlugin: ChannelPlugin<ResolvedWeComAccount> = {
   },
   reload: {configPrefixes: [`channels.${CHANNEL_ID}`]},
   config: {
-    // 列出所有账户 ID（最小实现只支持默认账户）
-    listAccountIds: () => [DEFAULT_ACCOUNT_ID],
+    // 列出所有账户 ID
+    listAccountIds: (cfg) => listWeComAccountIds(cfg),
 
-    // 解析账户配置
-    resolveAccount: (cfg) => resolveWeComAccount(cfg),
+    // 解析账户配置（根据 accountId 查找）
+    resolveAccount: (cfg, accountId) => {
+      const id = accountId ?? DEFAULT_ACCOUNT_ID;
+      return resolveWeComAccountByName(cfg, id);
+    },
 
-    // 获取默认账户 ID
-    defaultAccountId: () => DEFAULT_ACCOUNT_ID,
+    // 获取默认账户 ID（第一个启用的账户）
+    defaultAccountId: (cfg) => {
+      const accounts = resolveWeComAccounts(cfg);
+      const enabled = accounts.filter((a) => a.enabled);
+      return enabled.length > 0 ? enabled[0].accountId : DEFAULT_ACCOUNT_ID;
+    },
 
     // 设置账户启用状态
-    setAccountEnabled: ({cfg, enabled}) => {
-      const wecomConfig = (cfg.channels?.[CHANNEL_ID] ?? {}) as WeComConfig;
-      return {
-        ...cfg,
-        channels: {
-          ...cfg.channels,
-          [CHANNEL_ID]: {
-            ...wecomConfig,
-            enabled,
-          },
-        },
-      };
+    setAccountEnabled: ({cfg, accountId, enabled}) => {
+      const id = accountId ?? DEFAULT_ACCOUNT_ID;
+      return setWeComAccountEnabled(cfg, id, enabled);
     },
 
     // 删除账户
-    deleteAccount: ({cfg}) => {
-      const wecomConfig = (cfg.channels?.[CHANNEL_ID] ?? {}) as WeComConfig;
-      const {botId, secret, ...rest} = wecomConfig;
-      return {
-        ...cfg,
-        channels: {
-          ...cfg.channels,
-          [CHANNEL_ID]: rest,
-        },
-      };
+    deleteAccount: ({cfg, accountId}) => {
+      const id = accountId ?? DEFAULT_ACCOUNT_ID;
+      return deleteWeComAccount(cfg, id);
     },
 
     // 检查是否已配置
@@ -147,9 +145,10 @@ export const wecomPlugin: ChannelPlugin<ResolvedWeComAccount> = {
     }),
 
     // 解析允许来源列表
-    resolveAllowFrom: ({cfg}) => {
-      const account = resolveWeComAccount(cfg);
-      return (account.config.allowFrom ?? []).map((entry) => String(entry));
+    resolveAllowFrom: ({cfg, accountId}) => {
+      const id = accountId ?? DEFAULT_ACCOUNT_ID;
+      const account = resolveWeComAccountByName(cfg, id);
+      return (account?.config.allowFrom ?? []).map((entry) => String(entry));
     },
 
     // 格式化允许来源列表
@@ -162,8 +161,8 @@ export const wecomPlugin: ChannelPlugin<ResolvedWeComAccount> = {
     resolveDmPolicy: ({account}) => {
       const basePath = `channels.${CHANNEL_ID}.`;
       return {
-        policy: account.config.dmPolicy ?? "open",
-        allowFrom: account.config.allowFrom ?? [],
+        policy: account?.config.dmPolicy ?? "open",
+        allowFrom: account?.config.allowFrom ?? [],
         policyPath: `${basePath}dmPolicy`,
         allowFromPath: basePath,
         approveHint: formatPairingApproveHint(CHANNEL_ID),
@@ -172,6 +171,8 @@ export const wecomPlugin: ChannelPlugin<ResolvedWeComAccount> = {
     },
     collectWarnings: ({account, cfg}) => {
       const warnings: string[] = [];
+
+      if (!account) return warnings;
 
       // DM 策略警告
       const dmPolicy = account.config.dmPolicy ?? "open";
@@ -189,11 +190,6 @@ export const wecomPlugin: ChannelPlugin<ResolvedWeComAccount> = {
       // 群组策略警告
       const defaultGroupPolicy = cfg.channels?.defaults?.groupPolicy;
       const groupPolicy = account.config.groupPolicy ?? defaultGroupPolicy ?? "open"
-      // const { groupPolicy } = resolveOpenProviderRuntimeGroupPolicy({
-      //   providerConfigPresent: true,
-      //   groupPolicy: account.config.groupPolicy,
-      //   defaultGroupPolicy,
-      // });
       if (groupPolicy === "open") {
         warnings.push(
           `- 企业微信群组：groupPolicy="open" 允许所有群组中的成员触发。设置 channels.${CHANNEL_ID}.groupPolicy="allowlist" + channels.${CHANNEL_ID}.groupAllowFrom 来限制群组。`,
@@ -304,7 +300,7 @@ export const wecomPlugin: ChannelPlugin<ResolvedWeComAccount> = {
             accountId,
             kind: "config",
             message: "企业微信机器人 ID 或 Secret 未配置",
-            fix: "Run: openclaw channels add wecom --bot-id <id> --secret <secret>",
+            fix: `Run: openclaw channels add wecom --account ${accountId} --bot-id <id> --secret <secret>`,
           });
         }
         return issues;
@@ -321,13 +317,13 @@ export const wecomPlugin: ChannelPlugin<ResolvedWeComAccount> = {
     },
     buildAccountSnapshot: ({account, runtime}) => {
       const configured = Boolean(
-        account.botId?.trim() &&
-        account.secret?.trim()
+        account?.botId?.trim() &&
+        account?.secret?.trim()
       );
       return {
-        accountId: account.accountId,
-        name: account.name,
-        enabled: account.enabled,
+        accountId: account?.accountId ?? DEFAULT_ACCOUNT_ID,
+        name: account?.name,
+        enabled: account?.enabled ?? false,
         configured,
         running: runtime?.running ?? false,
         lastStartAt: runtime?.lastStartAt ?? null,
@@ -348,39 +344,35 @@ export const wecomPlugin: ChannelPlugin<ResolvedWeComAccount> = {
         abortSignal: ctx.abortSignal,
       });
     },
-    logoutAccount: async ({cfg}) => {
+    logoutAccount: async ({cfg, accountId}) => {
       const nextCfg = {...cfg} as OpenClawConfig;
-      const wecomConfig = (cfg.channels?.[CHANNEL_ID] ?? {}) as WeComConfig;
-      const nextWecom = {...wecomConfig};
-      let cleared = false;
-      let changed = false;
+      const id = accountId ?? DEFAULT_ACCOUNT_ID;
 
-      if (nextWecom.botId || nextWecom.secret) {
-        delete nextWecom.botId;
-        delete nextWecom.secret;
-        cleared = true;
-        changed = true;
-      }
+      // 删除指定账户
+      const nextWecom = deleteWeComAccount(nextCfg, id);
 
-      if (changed) {
-        if (Object.keys(nextWecom).length > 0) {
-          nextCfg.channels = {...nextCfg.channels, [CHANNEL_ID]: nextWecom};
+      // 检查是否还有其他账户
+      const remainingAccounts = listWeComAccountIds(nextCfg);
+
+      if (remainingAccounts.length === 0) {
+        // 没有剩余账户，删除整个频道配置
+        const nextChannels = {...nextCfg.channels};
+        delete (nextChannels as Record<string, unknown>)[CHANNEL_ID];
+        if (Object.keys(nextChannels).length > 0) {
+          nextCfg.channels = nextChannels;
         } else {
-          const nextChannels = {...nextCfg.channels};
-          delete (nextChannels as Record<string, unknown>)[CHANNEL_ID];
-          if (Object.keys(nextChannels).length > 0) {
-            nextCfg.channels = nextChannels;
-          } else {
-            delete nextCfg.channels;
-          }
+          delete nextCfg.channels;
         }
         await getWeComRuntime().config.writeConfigFile(nextCfg);
+      } else {
+        // 有剩余账户，写入更新后的配置
+        await getWeComRuntime().config.writeConfigFile(nextWecom);
       }
 
-      const resolved = resolveWeComAccount(changed ? nextCfg : cfg);
-      const loggedOut = !resolved.botId && !resolved.secret;
+      const resolved = resolveWeComAccountByName(cfg, id);
+      const loggedOut = !resolved?.botId && !resolved?.secret;
 
-      return {cleared, envToken: false, loggedOut};
+      return {cleared: true, envToken: false, loggedOut};
     },
   },
 };

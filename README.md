@@ -1,59 +1,59 @@
-# 🤖 WeCom OpenClaw Plugin
+# 🤖 企业微信 OpenClaw 插件
 
-**WeCom channel plugin for [OpenClaw](https://github.com/openclaw)** — by the Tencent WeCom team.
+**OpenClaw [企业微信](https://github.com/openclaw) 频道插件** — 由腾讯企业微信团队提供。
 
-> A bot plugin powered by WeCom AI Bot WebSocket persistent connections. Supports direct messages & group chats, streaming replies, and proactive messaging.
-
----
-
-📖 [WeCom AI Bot Official Documentation](https://open.work.weixin.qq.com/help?doc_id=21657)
-
-
-## ✨ Features
-
-- 🔗 WebSocket persistent connection for stable communication
-- 💬 Supports both direct messages (DM) and group chat
-- 📤 Proactive messaging to specific users or groups
-- 🖼️ Receives and processes image and file messages with automatic downloading
-- ⏳ Streaming replies with "thinking" placeholder messages
-- 📝 Markdown formatting support for replies
-- 🔒 Built-in access control: DM Policy (pairing / open / allowlist / disabled) and Group Policy (open / allowlist / disabled)
-- ⚡ Auto heartbeat keep-alive and reconnection (up to 100 reconnect attempts)
-- 🧙 Interactive CLI setup wizard
+> 基于企业微信 AI 机器人 WebSocket 持久连接构建的机器人插件。支持私信和群聊、流式回复和主动消息推送。
 
 ---
 
-## 🚀 Getting Started
+📖 [企业微信 AI 机器人官方文档](https://open.work.weixin.qq.com/help?doc_id=21657)
 
-### Requirements
+
+## ✨ 功能特性
+
+- 🔗 WebSocket 持久连接，通信稳定
+- 💬 支持私信 (DM) 和群聊
+- 📤 支持主动向指定用户或群组发送消息
+- 🖼️ 接收并自动下载处理图片和文件消息
+- ⏳ 流式回复，支持"思考中"占位消息
+- 📝 支持 Markdown 格式回复
+- 🔒 内置访问控制：私信策略（pairing / open / allowlist / disabled）和群聊策略（open / allowlist / disabled）
+- ⚡ 自动心跳保活和重连（最多 100 次重连尝试）
+- 🧙 交互式 CLI 配置向导
+
+---
+
+## 🚀 快速开始
+
+### 环境要求
 
 - OpenClaw `>= 2026.2.13`
 
-### Quick Install
+### 快速安装
 
-Use the CLI tool to automatically install the plugin and complete bot configuration in one step:
-
-```shell
-npx -y @wecom/wecom-openclaw-cli install
-```
-
-### Manual Install
+使用 CLI 工具自动安装插件并完成机器人配置：
 
 ```shell
-openclaw plugins install @wecom/wecom-openclaw-plugin
+npx -y @lanmers/wecom-openclaw-cli install
 ```
 
-### Configuration
+### 手动安装
 
-#### Option 1: Interactive Setup
+```shell
+openclaw plugins install @lanmers/wecom-openclaw-plugin
+```
+
+### 配置
+
+#### 方式一：交互式配置
 
 ```shell
 openclaw channels add
 ```
 
-Follow the prompts to enter your WeCom bot's **Bot ID** and **Secret**.
+按照提示输入企业微信机器人的 **Bot ID** 和 **Secret**。
 
-#### Option 2: CLI Quick Setup
+#### 方式二：CLI 快速配置
 
 ```shell
 openclaw config set channels.wecom.botId <YOUR_BOT_ID>
@@ -62,38 +62,74 @@ openclaw config set channels.wecom.enabled true
 openclaw gateway restart
 ```
 
-### Configuration Reference
+### 配置参考
 
-| Config Path | Description | Options | Default |
-|---|---|---|---|
-| `channels.wecom.botId` | WeCom bot ID | — | — |
-| `channels.wecom.secret` | WeCom bot secret | — | — |
-| `channels.wecom.enabled` | Enable the channel | `true` / `false` | `false` |
-| `channels.wecom.websocketUrl` | WebSocket endpoint | — | `wss://openws.work.weixin.qq.com` |
-| `channels.wecom.dmPolicy` | DM access policy | `pairing` / `open` / `allowlist` / `disabled` | `open` |
-| `channels.wecom.allowFrom` | DM allowlist (user IDs) | — | `[]` |
-| `channels.wecom.groupPolicy` | Group chat access policy | `open` / `allowlist` / `disabled` | `open` |
-| `channels.wecom.groupAllowFrom` | Group allowlist (group IDs) | — | `[]` |
-| `channels.wecom.sendThinkingMessage` | Send "thinking" placeholder | `true` / `false` | `true` |
+#### 单账户配置（兼容旧版）
+
+| 配置路径 | 说明 | 选项 | 默认值 |
+|----------|------|------|--------|
+| `channels.wecom.botId` | 企业微信机器人 ID | - | - |
+| `channels.wecom.secret` | 企业微信机器人密钥 | - | - |
+| `channels.wecom.enabled` | 启用频道 | `true` / `false` | `false` |
+| `channels.wecom.websocketUrl` | WebSocket 端点 | - | `wss://openws.work.weixin.qq.com` |
+| `channels.wecom.dmPolicy` | 私信访问策略 | `pairing` / `open` / `allowlist` / `disabled` | `open` |
+| `channels.wecom.allowFrom` | 私信白名单（用户 ID） | - | `[]` |
+| `channels.wecom.groupPolicy` | 群聊访问策略 | `open` / `allowlist` / `disabled` | `open` |
+| `channels.wecom.groupAllowFrom` | 群聊白名单（群组 ID） | - | `[]` |
+| `channels.wecom.sendThinkingMessage` | 发送"思考中"占位消息 | `true` / `false` | `true` |
+
+#### 多账户配置（推荐）
+
+```json
+{
+  "channels": {
+    "wecom": {
+      "enabled": true,
+      "accounts": [
+        {
+          "name": "bot1",
+          "botId": "xxx",
+          "secret": "xxx",
+          "enabled": true
+        },
+        {
+          "name": "bot2",
+          "botId": "yyy",
+          "secret": "yyy",
+          "enabled": false
+        }
+      ]
+    }
+  }
+}
+```
+
+| 配置路径 | 说明 | 选项 | 默认值 |
+|----------|------|------|--------|
+| `channels.wecom.accounts[].name` | 账户唯一标识 | - | - |
+| `channels.wecom.accounts[].botId` | 企业微信机器人 ID | - | - |
+| `channels.wecom.accounts[].secret` | 企业微信机器人密钥 | - | - |
+| `channels.wecom.accounts[].enabled` | 启用该账户 | `true` / `false` | `true` |
+| `channels.wecom.accounts[].websocketUrl` | WebSocket 端点（可选，覆盖全局配置） | - | - |
 
 ---
 
-## 🔒 Access Control
+## 🔒 访问控制
 
-### DM (Direct Message) Access
+### 私信访问
 
-**Default**: `dmPolicy: "open"` — all users can send direct messages without approval.
+**默认**: `dmPolicy: "open"` — 所有用户都可以发送私信，无需审批。
 
-#### Approve Pairing
+#### 审批配对
 
 ```shell
-openclaw pairing list wecom            # View pending pairing requests
-openclaw pairing approve wecom <CODE>  # Approve a pairing request
+openclaw pairing list wecom            # 查看待处理的配对请求
+openclaw pairing approve wecom <CODE>  # 审批配对请求
 ```
 
-#### Allowlist Mode
+#### 白名单模式
 
-Configure allowed user IDs via `channels.wecom.allowFrom`:
+通过 `channels.wecom.allowFrom` 配置允许的用户 ID：
 
 ```json
 {
@@ -106,25 +142,25 @@ Configure allowed user IDs via `channels.wecom.allowFrom`:
 }
 ```
 
-#### Open Mode
+#### 开放模式
 
-Set `dmPolicy: "open"` to allow all users to send direct messages without approval.
+设置 `dmPolicy: "open"` 允许所有用户发送私信，无需审批。
 
-#### Disabled Mode
+#### 禁用模式
 
-Set `dmPolicy: "disabled"` to completely block all direct messages.
+设置 `dmPolicy: "disabled"` 完全屏蔽所有私信。
 
-### Group Access
+### 群聊访问
 
-#### Group Policy (`channels.wecom.groupPolicy`)
+#### 群聊策略 (`channels.wecom.groupPolicy`)
 
-- `"open"` — Allow messages from all groups (default)
-- `"allowlist"` — Only allow groups listed in `groupAllowFrom`
-- `"disabled"` — Disable all group messages
+- `"open"` — 允许所有群组的消息（默认）
+- `"allowlist"` — 仅允许 `groupAllowFrom` 中列出的群组
+- `"disabled"` — 禁用所有群组消息
 
-### Group Configuration Examples
+### 群聊配置示例
 
-#### Allow All Groups (Default Behavior)
+#### 允许所有群组（默认行为）
 
 ```json
 {
@@ -136,7 +172,7 @@ Set `dmPolicy: "disabled"` to completely block all direct messages.
 }
 ```
 
-#### Allow Only Specific Groups
+#### 仅允许特定群组
 
 ```json
 {
@@ -149,9 +185,9 @@ Set `dmPolicy: "disabled"` to completely block all direct messages.
 }
 ```
 
-#### Allow Only Specific Senders Within a Group (Sender Allowlist)
+#### 允许群组内特定成员（发送者白名单）
 
-In addition to the group allowlist, you can restrict which members within a group are allowed to interact with the bot. Only messages from users listed in `groups.<chatId>.allowFrom` will be processed; messages from other members will be silently ignored. This is a sender-level allowlist that applies to **all messages**.
+除了群组白名单外，还可以限制群组内哪些成员可以与机器人交互。只有 `groups.<chatId>.allowFrom` 中列出的用户发送的消息才会被处理；其他成员的消息将被静默忽略。这是一个适用于**所有消息**的发送者级别白名单。
 
 ```json
 {
@@ -171,7 +207,7 @@ In addition to the group allowlist, you can restrict which members within a grou
 
 ---
 
-## 📦 Update
+## 📦 更新
 
 ```shell
 openclaw plugins update wecom-openclaw-plugin
@@ -179,6 +215,6 @@ openclaw plugins update wecom-openclaw-plugin
 
 ---
 
-## 📄 License
+## 📄 许可证
 
 MIT

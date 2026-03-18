@@ -3494,9 +3494,9 @@ koffi@^2.9.0:
   resolved "https://registry.yarnpkg.com/koffi/-/koffi-2.15.2.tgz#1ab8e04f496b9e8eeeff25c7be159889117a4a68"
   integrity sha512-r9tjJLVRSOhCRWdVyQlF3/Ugzeg13jlzS4czS82MAgLff4W+BcYOW7g8Y62t9O5JYjYOLAjAovAZDNlDfZNu+g==
 
-"libsignal@git+https://github.com/whiskeysockets/libsignal-node.git":
+"libsignal@git+https://github.com/whiskeysockets/libsignal-node":
   version "2.0.1"
-  resolved "git+https://github.com/whiskeysockets/libsignal-node.git#1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67"
+  resolved "git+https://github.com/whiskeysockets/libsignal-node#1c30d7d7e76a3b0aa120b04dc6a26f5a12dccf67"
   dependencies:
     curve25519-js "^0.0.4"
     protobufjs "6.8.8"
